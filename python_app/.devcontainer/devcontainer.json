@@ -1,14 +1,21 @@
-{                                                                                                                                                                                                                                         
+{    
     "name": "python_app",
-    "image": "ubuntu:22.04",
+    "dockerComposeFile": "./docker-compose.yaml",
+    "service": "python_app",
+    "workspaceFolder": "/app",
     "features": {
         "ghcr.io/devcontainers/features/python:1": {
             "version": 3.12,
             "toolsToInstall" : ["poetry"]
+        },
+        "ghcr.io/itsmechlark/features/postgresql:1": {
+            "version": 13
         }
     },
-    "appPort": 8000,
-    "postCreateCommand": "poetry install"
+    "postCreateCommand": "poetry install",
+    "remoteEnv": {
+        "GITLAB_TOKEN": "${localEnv:GITLAB_TOKEN}"
+    }
 }
 
 
