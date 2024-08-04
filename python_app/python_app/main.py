@@ -27,12 +27,12 @@ async def lifespan(app_instance: FastAPI):
     Create and clean DB connections pool
     """
     app_instance.state.pool = await asyncpg.create_pool(command_timeout=10)
-    logger.info("Initialized connection pool")
+    logger.info("Initialized DB connection pool")
     await init_db_structure(app.state.pool)
     yield
     if getattr(app_instance.state, 'pool') and app_instance.state.pool:
         await app_instance.state.pool.close()
-    logger.info("Cleaned connection pool")
+    logger.info("Cleaned DB connection pool")
 
 app = FastAPI(lifespan=lifespan)
 
@@ -89,8 +89,7 @@ async def get_item(item_id: str, db_conn: DBConnection):
     )
     if not res:
         raise HTTPException(status_code=404, detail="Item not found")
-    # we fetch using PK, so it is safe to assume we have only one record
-
+    # we fetch using table PK, so it is safe to assume we have only one record
     return {"value": next(res.items())[1]}
 
 @app.post("/", status_code=status.HTTP_201_CREATED, responses={

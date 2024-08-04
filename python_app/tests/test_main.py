@@ -2,7 +2,6 @@ import uuid
 import time
 import pytest
 from fastapi.testclient import TestClient
-from fastapi import FastAPI
 
 from python_app.main import app
 
