@@ -12,7 +12,7 @@
             "version": 13
         }
     },
-    "postCreateCommand": "poetry install",
+    "postCreateCommand": "poetry install --with=dev",
     "remoteEnv": {
         "GITLAB_TOKEN": "${localEnv:GITLAB_TOKEN}"
     }
