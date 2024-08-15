@@ -18,9 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-
-### Initializing FastAPI app
-
+# Initializing FastAPI app
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     """
@@ -46,8 +44,7 @@ class Item(BaseModel):
     value: str
 
 
-
-### DB section ###
+# DB section #
 async def get_db_connection(
     request: Request
 ) -> AsyncGenerator[asyncpg.pool.PoolConnectionProxy, None]:
@@ -73,9 +70,10 @@ async def init_db_structure(pool: asyncpg.pool.Pool):
         logger.info("Initialized DB structure")
 
 # Custom Types
-DBConnection = Annotated[dict, Depends(get_db_connection)]
+DBConnection = Annotated[asyncpg.pool.PoolConnectionProxy, Depends(get_db_connection)]
 
-### Handlers ###
+
+# Handlers #
 @app.get("/{item_id}", status_code=status.HTTP_200_OK, responses={
     "200": {"description": "Item found"},
     "404": {"description": "Item not found"}
@@ -85,12 +83,13 @@ async def get_item(item_id: str, db_conn: DBConnection):
     Get item value by `item_id`
     """
     res = await db_conn.fetchrow(
-            'SELECT value from data WHERE id = $1', item_id
+        'SELECT value from data WHERE id = $1', item_id
     )
     if not res:
         raise HTTPException(status_code=404, detail="Item not found")
     # we fetch using table PK, so it is safe to assume we have only one record
     return {"value": next(res.items())[1]}
+
 
 @app.post("/", status_code=status.HTTP_201_CREATED, responses={
     "201": {"description": "Item was created"},
@@ -111,12 +110,13 @@ async def set_item(item: Item, db_conn: DBConnection):
     return None
 
 
-### HTTP Server ###
+# HTTP Server #
 def start_server():
     """
     Started uvicorn server
     """
     uvicorn.run('main:app', host="0.0.0.0", port=8000, reload=True)
+
 
 if __name__ == "__main__":
     start_server()

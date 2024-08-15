@@ -2,41 +2,63 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"log"
 	"net/http"
 	"os"
-	"time"
 )
 
 type Item struct {
-	itemId string `json:"item_id"`
-	value  string `json:"value"`
+	ItemId string `json:"item_id"`
+	Value  string `json:"value"`
+}
+
+func initDBStructure(ctx context.Context, dbpool *pgxpool.Pool) error {
+	if _, err := dbpool.Exec(ctx, "CREATE TABLE IF NOT EXISTS data (id text PRIMARY KEY, value text);"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func acquireDBPool(ctx context.Context) (*pgxpool.Pool, error) {
+	dbpool, err := pgxpool.New(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	err = dbpool.Ping(ctx)
+	if err != nil {
+		dbpool.Close()
+		return nil, err
+	}
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			if dbpool != nil {
+				dbpool.Close()
+			}
+		}
+	}()
+	return dbpool, nil
 }
 
 func main() {
-	ctx := context.Background()
-	ctx, _ = context.WithTimeout(ctx, time.Duration(time.Second*10))
-
-	// connection string is "', we take all params from environment variables
-	dbpool, err := pgxpool.New(ctx, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dbpool, err := acquireDBPool(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to create connection pool: %v\n", err)
-		os.Exit(1)
-	}
-	defer dbpool.Close()
-
-	var greeting string
-	err = dbpool.QueryRow(ctx, "select 'Hello, world!'").Scan(&greeting)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "QueryRow failed: %v\n", err)
+		log.Printf("Failed to acquire db-pool, error %s", err)
 		os.Exit(1)
 	}
 
-	fmt.Println(greeting)
-
-	storage := make(map[string]string, 10)
+	err = initDBStructure(ctx, dbpool)
+	if err != nil {
+		log.Printf("Failed to init db structure, error %s", err)
+		os.Exit(1)
+	}
 	//gin.SetMode(gin.ReleaseMode) // Set to gin.DebugMode for development
 	router := gin.Default()
 	err = router.SetTrustedProxies(nil)
@@ -45,9 +67,17 @@ func main() {
 	}
 	router.GET("/:item_id", func(c *gin.Context) {
 		itemID := c.Param("item_id")
-		value, found := storage[itemID]
-		if !found {
-			c.String(http.StatusNotFound, "Item not found")
+		var value string
+		err := dbpool.QueryRow(c.Request.Context(), "SELECT value FROM data WHERE id = $1", itemID).Scan(&value)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				c.Status(http.StatusNotFound)
+			} else {
+				c.JSON(
+					http.StatusInternalServerError,
+					gin.H{"error": err.Error()},
+				)
+			}
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -57,16 +87,31 @@ func main() {
 
 	router.POST("/", func(c *gin.Context) {
 		var newItem Item
-		if err := c.BindJSON(&newItem); err != nil {
+		if err := c.ShouldBindBodyWithJSON(&newItem); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		if _, found := storage[newItem.itemId]; found {
-			c.String(http.StatusOK, "Item already exists")
+		res, err := dbpool.Exec(
+			c.Request.Context(),
+			"INSERT INTO data (id, value) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+			newItem.ItemId, newItem.Value,
+		)
+
+		if err != nil {
+			c.JSON(
+				http.StatusInternalServerError,
+				gin.H{"error": err.Error()},
+			)
+			return
+		}
+		if res.RowsAffected() == 0 {
+			c.Status(http.StatusOK)
 		} else {
-			storage[newItem.itemId] = newItem.value
-			c.String(http.StatusCreated, "Item created")
+			c.Status(http.StatusCreated)
 		}
 	})
-	router.Run(":8000")
+	err = router.Run(":8000")
+	if err != nil {
+		log.Printf("Failed to run router. Err %s", err)
+	}
 }
