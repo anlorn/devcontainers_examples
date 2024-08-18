@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 type Item struct {
@@ -35,10 +39,16 @@ func acquireDBPool(ctx context.Context) (*pgxpool.Pool, error) {
 	}
 
 	go func() {
-		select {
-		case <-ctx.Done():
-			if dbpool != nil {
-				dbpool.Close()
+		for {
+			select {
+			case <-ctx.Done():
+				if dbpool != nil {
+					fmt.Println("Closing db-pool due to context cancellation")
+					dbpool.Close()
+					return
+				}
+			case <-time.After(time.Second * 5):
+				fmt.Println("Waiting for db-pool to close...")
 			}
 		}
 	}()
@@ -46,15 +56,16 @@ func acquireDBPool(ctx context.Context) (*pgxpool.Pool, error) {
 }
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	dbpool, err := acquireDBPool(ctx)
+	termination := make(chan os.Signal, 1)
+	signal.Notify(termination, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	appCtx, cancel := context.WithCancel(context.Background())
+	dbpool, err := acquireDBPool(appCtx)
 	if err != nil {
 		log.Printf("Failed to acquire db-pool, error %s", err)
 		os.Exit(1)
 	}
 
-	err = initDBStructure(ctx, dbpool)
+	err = initDBStructure(appCtx, dbpool)
 	if err != nil {
 		log.Printf("Failed to init db structure, error %s", err)
 		os.Exit(1)
@@ -110,8 +121,26 @@ func main() {
 			c.Status(http.StatusCreated)
 		}
 	})
-	err = router.Run(":8000")
-	if err != nil {
-		log.Printf("Failed to run router. Err %s", err)
+
+	srv := &http.Server{
+		Addr:    ":8000",
+		Handler: router,
 	}
+
+	go func() {
+		if err := srv.ListenAndServe(); err != nil {
+			if !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("Failed to start server. Err %s", err)
+			}
+		}
+	}()
+	<-termination
+	log.Println("Server is shutting down...")
+	err = srv.Shutdown(appCtx)
+	if err != nil {
+		log.Printf("Failed to gracefully shutdown server. Err %s", err)
+	}
+	cancel()
+
+	os.Exit(0)
 }
