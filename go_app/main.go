@@ -43,7 +43,7 @@ func initDBStructure(ctx context.Context, dbPool *pgxpool.Pool) error {
 // It returns a channel where bool must be written to clean up the pool.
 func connectToDB(ctx context.Context, wg *sync.WaitGroup) (*pgxpool.Pool, chan bool, error) {
 	cleanDBPoolChannel := make(chan bool, 1)
-	dbPool, err := pgxpool.New(ctx, "")
+	dbPool, err := pgxpool.New(ctx, "") // for simplicity, we use env variable to define connection parameters
 	if err != nil {
 		return nil, cleanDBPoolChannel, err
 	}
