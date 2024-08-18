@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"log"
+	"github.com/lmittmann/tint"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -43,12 +43,12 @@ func acquireDBPool(ctx context.Context) (*pgxpool.Pool, error) {
 			select {
 			case <-ctx.Done():
 				if dbpool != nil {
-					fmt.Println("Closing db-pool due to context cancellation")
+					slog.Info("Closing db-pool...")
 					dbpool.Close()
 					return
 				}
 			case <-time.After(time.Second * 5):
-				fmt.Println("Waiting for db-pool to close...")
+				slog.Info("Waiting for db-pool to close...")
 			}
 		}
 	}()
@@ -56,21 +56,32 @@ func acquireDBPool(ctx context.Context) (*pgxpool.Pool, error) {
 }
 
 func main() {
+
+	// Logging setup
+	slog.SetDefault(
+		slog.New(
+			tint.NewHandler(
+				os.Stdout,
+				&tint.Options{Level: slog.LevelInfo},
+			),
+		),
+	)
+
 	termination := make(chan os.Signal, 1)
 	signal.Notify(termination, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	appCtx, cancel := context.WithCancel(context.Background())
 	dbpool, err := acquireDBPool(appCtx)
+
 	if err != nil {
-		log.Printf("Failed to acquire db-pool, error %s", err)
+		slog.Error("Failed to create db connections pool", slog.Any("error", err))
 		os.Exit(1)
 	}
 
 	err = initDBStructure(appCtx, dbpool)
 	if err != nil {
-		log.Printf("Failed to init db structure, error %s", err)
+		slog.Error("Failed to init DB structure", slog.Any("error", err))
 		os.Exit(1)
 	}
-	//gin.SetMode(gin.ReleaseMode) // Set to gin.DebugMode for development
 	router := gin.Default()
 	err = router.SetTrustedProxies(nil)
 	if err != nil {
@@ -130,15 +141,15 @@ func main() {
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
 			if !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("Failed to start server. Err %s", err)
+				slog.Error("Failed to start server", slog.Any("error", err))
 			}
 		}
 	}()
 	<-termination
-	log.Println("Server is shutting down...")
+	slog.Info("Server is shutting down...")
 	err = srv.Shutdown(appCtx)
 	if err != nil {
-		log.Printf("Failed to gracefully shutdown server. Err %s", err)
+		slog.Error("Failed to gracefully shutdown server", slog.Any("error", err))
 	}
 	cancel()
 
