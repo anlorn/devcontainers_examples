@@ -163,3 +163,10 @@ cython_debug/
 
 #VIM
 *.swp
+
+# VSCODE
+.vscode/
+
+
+# Go binary
+go_app/app
