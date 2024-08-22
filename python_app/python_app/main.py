@@ -2,6 +2,7 @@
 Simple app to show usage of devcontainers in development.
 For simplicity we keep whole app in one file
 """
+import sys
 import logging
 from contextlib import asynccontextmanager
 from typing import Annotated, AsyncGenerator
@@ -25,8 +26,12 @@ async def lifespan(app_instance: FastAPI):
     Create and clean DB connections pool
     """
     app_instance.state.pool = await asyncpg.create_pool(command_timeout=10)
-    logger.info("Initialized DB connection pool")
-    await init_db_structure(app.state.pool)
+    if app_instance.state.pool:
+        logger.info("Initialized DB connection pool")
+        await init_db_structure(app_instance.state.pool)
+    else:
+        logger.error("Failed to initialize DB connection pool")
+        sys.exit(1)
     yield
     if getattr(app_instance.state, 'pool') and app_instance.state.pool:
         await app_instance.state.pool.close()
